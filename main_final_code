@@ -1,0 +1,425 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_BMP085.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADXL345_U.h>
+#include <TinyGPS++.h>
+#include <qmc5883p.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_BMP085 bmp;
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+
+TinyGPSPlus gps;
+#define GPS_SERIAL Serial1
+
+#define GYRO_ADDR 0x68
+#define BUTTON_PIN 14
+
+QMC5883P mag;
+
+int screenState = 0;
+bool lastButton = HIGH;
+
+float smoothHeading = 0;
+
+// ===== smoothing =====
+float smooth(float v) {
+  smoothHeading = smoothHeading * 0.8 + v * 0.2;
+  return smoothHeading;
+}
+
+// ===== heading direction =====
+String dir(float h) {
+  if (h < 22.5 || h >= 337.5) return "N";
+  if (h < 67.5) return "NE";
+  if (h < 112.5) return "E";
+  if (h < 157.5) return "SE";
+  if (h < 202.5) return "S";
+  if (h < 247.5) return "SW";
+  if (h < 292.5) return "W";
+  return "NW";
+}
+
+// ===== GYRO INIT =====
+void gyroInit() {
+  Wire.beginTransmission(GYRO_ADDR);
+  Wire.write(0x3E);
+  Wire.write(0x00);
+  Wire.endTransmission();
+  delay(100);
+}
+
+// ===== GYRO READ =====
+void readGyro(float &gx, float &gy, float &gz) {
+  Wire.beginTransmission(GYRO_ADDR);
+  Wire.write(0x1D);
+  Wire.endTransmission();
+
+  Wire.requestFrom(GYRO_ADDR, 6);
+
+  if (Wire.available() == 6) {
+    gx = (int16_t)(Wire.read() << 8 | Wire.read()) / 14.375;
+    gy = (int16_t)(Wire.read() << 8 | Wire.read()) / 14.375;
+    gz = (int16_t)(Wire.read() << 8 | Wire.read()) / 14.375;
+  }
+}
+
+// ================= SETUP =================
+void setup() {
+  Serial.begin(9600);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Wire.setSDA(4);
+  Wire.setSCL(5);
+  Wire.begin();
+  Wire.setClock(100000);
+
+  delay(500);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    while (1);
+  }
+
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+
+  bmp.begin();
+  accel.begin();
+  gyroInit();
+
+  GPS_SERIAL.setTX(0);
+  GPS_SERIAL.setRX(1);
+  GPS_SERIAL.begin(9600);
+
+  // ===== MAGNETOMETER INIT =====
+  if (!mag.begin()) {
+    Serial.println("Compass not found!");
+  } else {
+    Serial.println("Compass OK");
+  }
+}
+
+// ================= LOOP =================
+void loop() {
+
+  while (GPS_SERIAL.available()) {
+    gps.encode(GPS_SERIAL.read());
+  }
+
+  bool btn = digitalRead(BUTTON_PIN);
+
+  if (lastButton == HIGH && btn == LOW) {
+    screenState++;
+    if (screenState > 6) screenState = 0;
+    delay(200);
+  }
+  lastButton = btn;
+
+  display.clearDisplay();
+
+if (screenState == 0) {
+
+  display.setTextSize(1);
+  display.setCursor(20, 5);
+  display.print("SENSOR STATION");
+
+    // ================= GPS TIME (SMALL TOP) =================
+    if (gps.time.isValid() && gps.date.isValid()) {
+
+      int gh = gps.time.hour() + 5;
+      int gm = gps.time.minute();
+      int gs = gps.time.second();
+
+      if (gh >= 24) gh -= 24;
+
+      display.setTextSize(1);
+      display.setCursor(35, 18);
+
+      if (gh < 10) display.print("0");
+      display.print(gh);
+      display.print(":");
+      if (gm < 10) display.print("0");
+      display.print(gm);
+      display.print(":");
+      if (gs < 10) display.print("0");
+      display.print(gs);
+
+    } else {
+      display.setTextSize(1);
+      display.setCursor(45, 18);
+      display.print("--:--:--");
+    }
+
+    // ================= LOCAL TIMER (BIG CENTER) =================
+    unsigned long sec = millis() / 1000;
+    int lh = (sec / 3600) % 24;
+    int lm = (sec / 60) % 60;
+    int ls = sec % 60;
+
+    display.setTextSize(2);
+    display.setCursor(20, 32);
+
+    if (lh < 10) display.print("0");
+    display.print(lh);
+    display.print(":");
+
+    if (lm < 10) display.print("0");
+    display.print(lm);
+    display.print(":");
+
+    if (ls < 10) display.print("0");
+    display.print(ls);
+  }
+
+  // ================= BMP =================
+  else if (screenState == 1) {
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("BMP180");
+
+    display.setTextSize(2);
+    display.setCursor(0, 20);
+    display.print(bmp.readTemperature(), 1);
+    display.print("C");
+
+    display.setTextSize(2);
+    display.setCursor(0, 45);
+    display.print(bmp.readPressure() / 100);
+    display.setTextSize(1);
+    display.print(" hPa");
+  }
+
+  // ================= LEVEL =================
+  else if (screenState == 2) {
+    sensors_event_t a;
+    accel.getEvent(&a);
+
+    float ay = a.acceleration.y;
+    float az = a.acceleration.z;
+
+    static float x = 64, y = 32;
+
+    x = x * 0.8 + (64 + ay * 6) * 0.2;
+    y = y * 0.8 + (32 - az * 3) * 0.2;
+
+    int cx = constrain((int)x, 5, 123);
+    int cy = constrain((int)y, 15, 63);
+
+    display.setTextSize(1);
+    display.setCursor(45, 0);
+    display.print("LEVEL");
+
+    display.drawRect(0, 10, 128, 54, WHITE);
+    display.drawCircle(64, 37, 15, WHITE);
+    display.drawLine(0, 37, 128, 37, WHITE);
+    display.drawLine(64, 10, 64, 64, WHITE);
+
+    display.fillCircle(cx, cy, 4, WHITE);
+  }
+
+  // ================= GYRO =================
+  else if (screenState == 3) {
+    float gx = 0, gy = 0, gz = 0;
+    readGyro(gx, gy, gz);
+
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("GYRO");
+
+    display.setCursor(0, 15);
+    display.print("X:"); display.print(gx, 1);
+
+    display.setCursor(0, 30);
+    display.print("Y:"); display.print(gy, 1);
+
+    display.setCursor(0, 45);
+    display.print("Z:"); display.print(gz, 1);
+  }
+
+  // ================= GPS =================
+  else if (screenState == 4) {
+    display.setTextSize(1);
+    display.setCursor(40, 0);
+    display.print("GPS");
+
+    if (gps.location.isValid()) {
+      display.setCursor(0, 15);
+      display.print("Lat:");
+      display.print(gps.location.lat(), 5);
+
+      display.setCursor(0, 27);
+      display.print("Lon:");
+      display.print(gps.location.lng(), 5);
+
+      display.setCursor(0, 39);
+      display.print("Speed:");
+      display.print(gps.speed.kmph(), 1);
+
+      display.setCursor(0, 51);
+      display.print("Sats:");
+      display.print(gps.satellites.value());
+    } else {
+      display.setCursor(10, 30);
+      display.print("NO GPS FIX");
+    }
+  }
+
+  // ================= NAV / GPS COMPASS (CLEAN UI) =================
+  else if (screenState == 5) {
+
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("NAVIGATION");
+
+    if (gps.location.isValid()) {
+
+      float speed = gps.speed.kmph();
+      float sats  = gps.satellites.value();
+
+      // ===== LEFT PANEL (DATA) =====
+      display.setCursor(0, 15);
+      display.print("Speed: ");
+      display.print(speed, 1);
+      display.print(" km/h");
+
+      display.setCursor(0, 27);
+      display.print("Sats: ");
+      display.print(sats);
+
+      display.setCursor(0, 39);
+      display.print("Fix: OK");
+
+      // ===== RIGHT COMPASS =====
+      int cx = 95;
+      int cy = 38;
+      int r  = 16;
+
+      display.drawCircle(cx, cy, r, WHITE);
+
+      if (gps.course.isValid()) {
+
+        float h = gps.course.deg();
+        float rad = radians(h);
+
+        int tx = cx + (r - 2) * sin(rad);
+        int ty = cy - (r - 2) * cos(rad);
+
+        display.drawLine(cx, cy, tx, ty, WHITE);
+
+        // arrow head
+        int hx1 = tx + 3 * sin(rad + 2.5);
+        int hy1 = ty - 3 * cos(rad + 2.5);
+
+        int hx2 = tx + 3 * sin(rad - 2.5);
+        int hy2 = ty - 3 * cos(rad - 2.5);
+
+        display.fillTriangle(tx, ty, hx1, hy1, hx2, hy2, WHITE);
+
+        display.setCursor(85, 55);
+        display.print("HDG");
+      }
+
+      // center dot
+      display.fillCircle(cx, cy, 2, WHITE);
+
+      // N marker
+      display.setCursor(cx - 2, cy - r - 8);
+      display.print("N");
+
+    } else {
+
+      display.setCursor(10, 30);
+      display.print("WAITING GPS FIX...");
+      display.setCursor(10, 45);
+      display.print("GO OUTSIDE");
+    }
+  }
+
+  // ================= REAL COMPASS (FINAL FIX ALIGNMENT) =================
+  else if (screenState == 6) {
+
+    float xyz[3];
+
+    if (!mag.readXYZ(xyz)) {
+      display.setCursor(10, 30);
+      display.print("NO COMPASS");
+      display.display();
+      return;
+    }
+
+    float heading = smooth(mag.getHeadingDeg());
+    String d = dir(heading);
+
+    // 🔁 FIX: если у тебя перепутано направление
+    // (очень частая проблема)
+    heading = 360 - heading;
+
+    int cx = 78;   // ➡️ ещё правее
+    int cy = 32;   // ⬆️ чуть выше
+    int r  = 22;
+
+    // ===== CIRCLE =====
+    display.drawCircle(cx, cy, r, WHITE);
+
+    // ===== CARDINAL POINTS (FIX N/S CHECK) =====
+    display.setTextSize(1);
+    display.setCursor(cx - 2, cy - r - 8); display.print("N");
+    display.setCursor(cx - 2, cy + r + 2); display.print("S");
+    display.setCursor(cx + r + 3, cy - 3); display.print("E");
+    display.setCursor(cx - r - 7, cy - 3); display.print("W");
+
+    // ===== TICKS =====
+    for (int a = 0; a < 360; a += 30) {
+      float rad = radians(a);
+
+      int x1 = cx + (r - 1) * sin(rad);
+      int y1 = cy - (r - 1) * cos(rad);
+
+      int x2 = cx + (r - 4) * sin(rad);
+      int y2 = cy - (r - 4) * cos(rad);
+
+      display.drawLine(x1, y1, x2, y2, WHITE);
+    }
+
+    // ===== NEEDLE =====
+    float rad = radians(heading);
+
+    int xTip = cx + (r - 3) * sin(rad);
+    int yTip = cy - (r - 3) * cos(rad);
+
+    int xBack = cx - (r - 12) * sin(rad);
+    int yBack = cy + (r - 12) * cos(rad);
+
+    display.drawLine(cx, cy, xTip, yTip, WHITE);
+    display.drawLine(cx, cy, xBack, yBack, WHITE);
+
+    int hx1 = xTip + 3 * sin(rad + 2.6);
+    int hy1 = yTip - 3 * cos(rad + 2.6);
+
+    int hx2 = xTip + 3 * sin(rad - 2.6);
+    int hy2 = yTip - 3 * cos(rad - 2.6);
+
+    display.fillTriangle(xTip, yTip, hx1, hy1, hx2, hy2, WHITE);
+
+    display.fillCircle(cx, cy, 2, WHITE);
+
+    // ===== TEXT FIX POSITION =====
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("COMPASS");
+
+    // ⬇️ ОПУСТИЛИ HEADING
+    display.setCursor(0, 18);
+    display.print((int)heading);
+    display.print(" ");
+    display.print(d);
+  }
+
+  display.display();
+  delay(50);
+}
