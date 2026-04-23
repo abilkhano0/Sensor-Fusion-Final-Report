@@ -69,7 +69,6 @@ void readGyro(float &gx, float &gy, float &gz) {
   }
 }
 
-// ================= SETUP =================
 void setup() {
   Serial.begin(9600);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -104,7 +103,6 @@ void setup() {
   }
 }
 
-// ================= LOOP =================
 void loop() {
 
   while (GPS_SERIAL.available()) {
@@ -122,13 +120,13 @@ void loop() {
 
   display.clearDisplay();
 
-if (screenState == 0) {
+  if (screenState == 0) {
 
-  display.setTextSize(1);
-  display.setCursor(20, 5);
-  display.print("SENSOR STATION");
+    display.setTextSize(1);
+    display.setCursor(20, 5);
+    display.print("SENSOR STATION");
 
-    // ================= GPS TIME (SMALL TOP) =================
+    // GPS TIME
     if (gps.time.isValid() && gps.date.isValid()) {
 
       int gh = gps.time.hour() + 5;
@@ -137,7 +135,6 @@ if (screenState == 0) {
 
       if (gh >= 24) gh -= 24;
 
-      display.setTextSize(1);
       display.setCursor(35, 18);
 
       if (gh < 10) display.print("0");
@@ -150,12 +147,11 @@ if (screenState == 0) {
       display.print(gs);
 
     } else {
-      display.setTextSize(1);
       display.setCursor(45, 18);
       display.print("--:--:--");
     }
 
-    // ================= LOCAL TIMER (BIG CENTER) =================
+    // LOCAL TIMER
     unsigned long sec = millis() / 1000;
     int lh = (sec / 3600) % 24;
     int lm = (sec / 60) % 60;
@@ -176,7 +172,6 @@ if (screenState == 0) {
     display.print(ls);
   }
 
-  // ================= BMP =================
   else if (screenState == 1) {
     display.setTextSize(1);
     display.setCursor(0, 0);
@@ -194,7 +189,6 @@ if (screenState == 0) {
     display.print(" hPa");
   }
 
-  // ================= LEVEL =================
   else if (screenState == 2) {
     sensors_event_t a;
     accel.getEvent(&a);
@@ -210,7 +204,6 @@ if (screenState == 0) {
     int cx = constrain((int)x, 5, 123);
     int cy = constrain((int)y, 15, 63);
 
-    display.setTextSize(1);
     display.setCursor(45, 0);
     display.print("LEVEL");
 
@@ -222,12 +215,10 @@ if (screenState == 0) {
     display.fillCircle(cx, cy, 4, WHITE);
   }
 
-  // ================= GYRO =================
   else if (screenState == 3) {
     float gx = 0, gy = 0, gz = 0;
     readGyro(gx, gy, gz);
 
-    display.setTextSize(1);
     display.setCursor(0, 0);
     display.print("GYRO");
 
@@ -241,9 +232,7 @@ if (screenState == 0) {
     display.print("Z:"); display.print(gz, 1);
   }
 
-  // ================= GPS =================
   else if (screenState == 4) {
-    display.setTextSize(1);
     display.setCursor(40, 0);
     display.print("GPS");
 
@@ -269,10 +258,8 @@ if (screenState == 0) {
     }
   }
 
-  // ================= NAV / GPS COMPASS (CLEAN UI) =================
   else if (screenState == 5) {
 
-    display.setTextSize(1);
     display.setCursor(0, 0);
     display.print("NAVIGATION");
 
@@ -281,7 +268,6 @@ if (screenState == 0) {
       float speed = gps.speed.kmph();
       float sats  = gps.satellites.value();
 
-      // ===== LEFT PANEL (DATA) =====
       display.setCursor(0, 15);
       display.print("Speed: ");
       display.print(speed, 1);
@@ -294,7 +280,6 @@ if (screenState == 0) {
       display.setCursor(0, 39);
       display.print("Fix: OK");
 
-      // ===== RIGHT COMPASS =====
       int cx = 95;
       int cy = 38;
       int r  = 16;
@@ -311,7 +296,6 @@ if (screenState == 0) {
 
         display.drawLine(cx, cy, tx, ty, WHITE);
 
-        // arrow head
         int hx1 = tx + 3 * sin(rad + 2.5);
         int hy1 = ty - 3 * cos(rad + 2.5);
 
@@ -324,10 +308,7 @@ if (screenState == 0) {
         display.print("HDG");
       }
 
-      // center dot
       display.fillCircle(cx, cy, 2, WHITE);
-
-      // N marker
       display.setCursor(cx - 2, cy - r - 8);
       display.print("N");
 
@@ -340,7 +321,6 @@ if (screenState == 0) {
     }
   }
 
-  // ================= REAL COMPASS (FINAL FIX ALIGNMENT) =================
   else if (screenState == 6) {
 
     float xyz[3];
@@ -355,25 +335,19 @@ if (screenState == 0) {
     float heading = smooth(mag.getHeadingDeg());
     String d = dir(heading);
 
-    // 🔁 FIX: если у тебя перепутано направление
-    // (очень частая проблема)
     heading = 360 - heading;
 
-    int cx = 78;   // ➡️ ещё правее
-    int cy = 32;   // ⬆️ чуть выше
+    int cx = 78;
+    int cy = 32;
     int r  = 22;
 
-    // ===== CIRCLE =====
     display.drawCircle(cx, cy, r, WHITE);
 
-    // ===== CARDINAL POINTS (FIX N/S CHECK) =====
-    display.setTextSize(1);
     display.setCursor(cx - 2, cy - r - 8); display.print("N");
     display.setCursor(cx - 2, cy + r + 2); display.print("S");
     display.setCursor(cx + r + 3, cy - 3); display.print("E");
     display.setCursor(cx - r - 7, cy - 3); display.print("W");
 
-    // ===== TICKS =====
     for (int a = 0; a < 360; a += 30) {
       float rad = radians(a);
 
@@ -386,7 +360,6 @@ if (screenState == 0) {
       display.drawLine(x1, y1, x2, y2, WHITE);
     }
 
-    // ===== NEEDLE =====
     float rad = radians(heading);
 
     int xTip = cx + (r - 3) * sin(rad);
@@ -405,15 +378,11 @@ if (screenState == 0) {
     int hy2 = yTip - 3 * cos(rad - 2.6);
 
     display.fillTriangle(xTip, yTip, hx1, hy1, hx2, hy2, WHITE);
-
     display.fillCircle(cx, cy, 2, WHITE);
 
-    // ===== TEXT FIX POSITION =====
-    display.setTextSize(1);
     display.setCursor(0, 0);
     display.print("COMPASS");
 
-    // ⬇️ ОПУСТИЛИ HEADING
     display.setCursor(0, 18);
     display.print((int)heading);
     display.print(" ");
